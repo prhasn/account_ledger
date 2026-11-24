@@ -144,4 +144,8 @@ function replayScenario(): ReplayResult {
   return replay(EVENTS);
 }
 
-export { EVENTS, replay, replayScenario };
+export {
+  EVENTS,
+  replay,
+  replayScenario,
+};

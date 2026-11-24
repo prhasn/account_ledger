@@ -78,4 +78,9 @@ function splitInstalments(input: SplitInstalmentsInput): readonly Minor[] {
   return instalments;
 }
 
-export { amountFromDecimal, formatMoney, roundHalfUp, splitInstalments };
+export {
+  amountFromDecimal,
+  formatMoney,
+  roundHalfUp,
+  splitInstalments,
+};
