@@ -1,0 +1,355 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>In-Memory Account Ledger: Architecture and Trade-offs</title>
+    <style>
+      @page {
+        size: A4;
+        margin: 15mm 16mm 15mm 16mm;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        color: #111;
+        font-family: "Noto Sans", Arial, sans-serif;
+        font-size: 9.6pt;
+        line-height: 1.35;
+      }
+
+      h1 {
+        margin: 0 0 1.5mm;
+        font-size: 18pt;
+        line-height: 1.12;
+      }
+
+      .subtitle {
+        margin: 0 0 4mm;
+        color: #555;
+        font-size: 10.5pt;
+      }
+
+      h2 {
+        margin: 5mm 0 2mm;
+        padding-bottom: 0.8mm;
+        border-bottom: 1px solid #aaa;
+        font-size: 12pt;
+      }
+
+      h3 {
+        margin: 3mm 0 1.2mm;
+        font-size: 10pt;
+      }
+
+      p {
+        margin: 0 0 2mm;
+        text-align: justify;
+      }
+
+      ul {
+        margin: 0 0 2mm 4mm;
+        padding: 0;
+      }
+
+      li {
+        margin-bottom: 0.8mm;
+      }
+
+      table {
+        width: 100%;
+        margin: 2mm 0 3mm;
+        border-collapse: collapse;
+        font-size: 8.5pt;
+      }
+
+      th,
+      td {
+        padding: 1.2mm 1.5mm;
+        border: 1px solid #bbb;
+        text-align: left;
+        vertical-align: top;
+      }
+
+      th {
+        background: #efefef;
+        font-weight: 600;
+      }
+
+      .note {
+        margin: 2mm 0 3mm;
+        padding: 2mm 2.5mm;
+        border-left: 2px solid #555;
+        background: #f5f5f5;
+        font-size: 9pt;
+      }
+
+      .small {
+        color: #555;
+        font-size: 8.6pt;
+      }
+
+      .page-break {
+        page-break-before: always;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>In-Memory Account Ledger: Architecture and Trade-offs</h1>
+    <p class="subtitle">Append-only, value-dated, deterministic replay</p>
+
+    <p>
+      The ledger is a deterministic event replay. Source events and ledger entries are
+      immutable, authorization state changes are appended, and every balance view is a
+      projection that can be rebuilt. Money is held in integer minor units. The design is
+      intentionally small enough to explain end to end, but three production concerns sit
+      just outside the six-day window: scale, the operational meaning of a value date, and
+      the full authorization lifecycle.
+    </p>
+
+    <h2>1. Append-only at scale</h2>
+
+    <p>
+      The current design keeps every event, every ledger entry, every authorization
+      transition, every daily snapshot, every accrual, and every error in memory. The
+      append-only log is the source of truth. The authorization map and the per-day
+      snapshots are indexes, not authority. That separation is the right starting point,
+      but it is also where the first 100x pressure appears.
+    </p>
+
+    <p>
+      At 100x volume, arithmetic is not the first bottleneck. The first break is the
+      combination of an unbounded in-memory history and an O(n) as-of balance query. Each
+      day close asks for an as-of balance per account, and each restatement asks for a
+      family of as-of balances across earlier days. With enough events, those scans dominate
+      the work. Memory grows with total history rather than with the current working set:
+      the event log, the transition log, closed authorizations, daily snapshots, and
+      restatement maps are all retained for the life of the process. The second break is
+      operational: a single-writer total order is a correctness feature, but it does not
+      survive concurrent producers, retries, or late arrivals without an idempotency and
+      ordering layer.
+    </p>
+
+    <p>
+      The cheapest structural change is a per-account, value-date cumulative balance index
+      with periodic checkpoints, backed by a segmented append-only log. A checkpoint stores
+      the account balance at a known sequence and value date. The index answers an as-of
+      query in logarithmic time, or in constant time from the nearest checkpoint. Old log
+      segments can leave RAM and live in object storage without changing the source-of-truth
+      contract. Only active holds need to stay in the hot authorization map; terminal
+      authorizations can be archived with their transitions. This is cheaper than
+      redesigning the ledger as a distributed system, and it defers both the query and the
+      memory problem. The next change would be an ingress idempotency key and a durable
+      single-writer partition per account, because duplicate or out-of-order postings are
+      the first correctness failure at volume, not arithmetic overflow.
+    </p>
+
+    <div class="note">
+      Where state grows without bound: the event log, the authorization transition log, the
+      daily snapshot list, the accrual list, and the error list. The cheapest deferral is
+      checkpoint plus value-date index plus segmented storage, not a bigger heap.
+    </div>
+
+    <h2>2. Value-dated entries in production</h2>
+
+    <p>
+      For a UAE-licensed bank, a value date is not a display detail. It drives when funds
+      are economically available, how a customer statement is explained, which reporting
+      date a balance belongs to, and how fee and interest calculations are justified. A
+      post that arrives after the business-day cut-off but carries an earlier value date
+      creates a difference between the as-at close the bank already reported and the as-of
+      view it can produce later. That difference is the operational surface: end-of-day
+      cut-offs, backdating windows, restatement reports, customer statements, dispute
+      evidence, audit trails, reconciliation to the general ledger, and the IFRS 9 and
+      regulatory reporting feeds that consume historical balances.
+    </p>
+
+    <p>
+      The architecture resolves the accounting question with a deliberate policy: fees and
+      interest are assessed at each close on the ledger known at that close, and a later
+      backdated entry changes current and future closes and the restatement view, not the
+      already-booked fee or accrual. This is defensible because a close is a point-in-time
+      measurement. It is not sufficient as a production control, because the customer and
+      the regulator can still see a restated history.
+    </p>
+
+    <p>
+      The one control I would add before go-live is a maker-checker backdating gate with a
+      hard window and an immutable restatement register. Any entry whose value date is
+      earlier than the current business date would require a reason code and a second
+      approver, and any entry older than a configured window would be blocked outright.
+      Posting the entry would automatically produce a restatement report showing every
+      affected daily close and every fee or interest decision that was not reopened. That
+      single control gives operations a bounded window, gives audit a named decision, and
+      gives the customer-facing team the evidence it needs when a statement changes. It
+      does not solve every value-date question, but it prevents silent backdating from
+      becoming the default.
+    </p>
+
+    <h2>3. Authorization lifecycle</h2>
+
+    <p>
+      An authorization is a state machine, not a single approval call. A matching settlement
+      is only one ending. Every other ending must release the hold atomically, append a
+      transition with a reason, and leave the ledger unchanged. The production rule should
+      be that no hold can disappear without a transition that names its ending.
+    </p>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Ending</th>
+          <th>Real-world scenario</th>
+          <th>Mandated system behavior</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Time expiry</td>
+          <td>A hotel or car-rental pre-authorization is never captured.</td>
+          <td>Release the remaining hold at the configured expiry, append <code>EXPIRED</code>, and post no ledger entry. Notify the customer where required.</td>
+        </tr>
+        <tr>
+          <td>Merchant void or cancellation</td>
+          <td>An order is cancelled before capture.</td>
+          <td>Release the hold, append <code>CANCELLED</code> with the merchant reference, and make the amount available immediately. The operation is idempotent.</td>
+        </tr>
+        <tr>
+          <td>Customer or bank cancellation</td>
+          <td>Lost card, confirmed fraud, or a customer request to stop the purchase.</td>
+          <td>Release the hold, append <code>CANCELLED</code> with a reason code, and require maker-checker for a bank-initiated cancellation.</td>
+        </tr>
+        <tr>
+          <td>Partial settlement</td>
+          <td>A restaurant bill or final capture is lower than the original estimate.</td>
+          <td>Debit the actual amount, release the remainder, append <code>SETTLED_PARTIAL</code>, and retain the original authorized amount for audit.</td>
+        </tr>
+        <tr>
+          <td>Over-settlement</td>
+          <td>A tip or currency adjustment pushes the capture above the hold.</td>
+          <td>Apply a stated policy: reject the excess, or debit the excess only if available balance supports it. Never silently exceed the hold.</td>
+        </tr>
+        <tr>
+          <td>Duplicate settlement</td>
+          <td>A network retry or a merchant double-capture.</td>
+          <td>Use a settlement idempotency key. The second attempt is a no-op with an audit record, not a second debit.</td>
+        </tr>
+        <tr>
+          <td>Account closure</td>
+          <td>The account is closed while holds are still active.</td>
+          <td>Cancel every active hold, append <code>CANCELLED</code>, and block new authorizations. Do not close the account with an unexplained hold.</td>
+        </tr>
+        <tr>
+          <td>Decline at creation</td>
+          <td>Available balance is insufficient.</td>
+          <td>Create a <code>DECLINED</code> authorization record with no hold. This is a business outcome, not an error.</td>
+        </tr>
+        <tr>
+          <td>Orphaned hold</td>
+          <td>A process crash or message loss between hold and settlement.</td>
+          <td>A recovery job reconciles the authorization network against local state, expires or reopens the hold, and appends the reconciliation reason.</td>
+        </tr>
+        <tr>
+          <td>Manual operations adjustment</td>
+          <td>Fraud investigation, dispute, or a goodwill release.</td>
+          <td>Require maker-checker, a reason code, and an append-only transition. Never edit the original authorization record.</td>
+        </tr>
+        <tr>
+          <td>Settlement after expiry</td>
+          <td>A late capture arrives after the hold was released.</td>
+          <td>Reject the settlement, retain the <code>EXPIRED</code> state, and require a new authorization or an explicitly approved unauthenticated debit.</td>
+        </tr>
+        <tr>
+          <td>Chargeback after settlement</td>
+          <td>Fraud or a customer dispute after funds moved.</td>
+          <td>This is not an authorization ending. Handle it as a separate dispute and compensating-entry process with its own evidence and approval.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p>
+      The invariant is that available balance is ledger balance minus active holds, and that
+      every hold release is an appended transition. The UI, the API, and the reconciliation
+      job all read the same projection, so none of them can silently disagree about whether
+      funds are reserved.
+    </p>
+
+    <h2 class="page-break">4. What I cut and why</h2>
+
+    <p>
+      The scope was deliberately narrow: no web layer, no persistence, no database, no UI.
+      Every simplification below is a production risk deferred, not a claim that the risk
+      does not exist.
+    </p>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Simplification</th>
+          <th>Reason</th>
+          <th>Production risk deferred</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>In-memory only</td>
+          <td>The brief excludes persistence and the suite is a replay.</td>
+          <td>Process loss destroys the ledger and its audit trail. No replication, no backup, no retention policy, no disaster recovery.</td>
+        </tr>
+        <tr>
+          <td>Single-threaded replay</td>
+          <td>Deterministic ordering makes the result explainable.</td>
+          <td>Concurrent postings can double-spend, race a hold against a settlement, or interleave a reversal with a fee. A durable single-writer partition or a serializable log is required.</td>
+        </tr>
+        <tr>
+          <td>No ingress idempotency store</td>
+          <td>The scenario has unique event ids.</td>
+          <td>A network retry can duplicate a credit, debit, fee, or settlement. Duplicate settlement is a direct customer harm.</td>
+        </tr>
+        <tr>
+          <td>No authorization expiry or over-settlement workflow</td>
+          <td>Neither case is exercised by the six-day window.</td>
+          <td>Stale holds can freeze customer funds. A late or larger capture has no safe policy. The lifecycle table above is the production mandate, not the build.</td>
+        </tr>
+        <tr>
+          <td>No FX or multi-currency conversion</td>
+          <td>Each account has one currency and the brief supplies no rate.</td>
+          <td>Cross-currency reporting, fee currency, and settlement currency become ambiguous. Adding an implicit rate would be worse than refusing the case.</td>
+        </tr>
+        <tr>
+          <td>Fixed daily interest and no holiday calendar</td>
+          <td>The brief gives a daily rate and six abstract days.</td>
+          <td>Actual/365, actual/360, business-day conventions, leap years, and cut-off times can change every accrual. A production ledger must state its convention.</td>
+        </tr>
+        <tr>
+          <td>Closed-period finality for fees and interest</td>
+          <td>It is deterministic and avoids retroactive liability.</td>
+          <td>A late backdated entry can make a customer dispute a historical fee or interest amount. The restatement gate and customer remediation process are missing.</td>
+        </tr>
+        <tr>
+          <td>No tax, withholding, fee waiver, or refund workflow</td>
+          <td>Out of scope for the ledger core.</td>
+          <td>Regulatory deductions and customer remediation become manual and unaudited. A refund must be a new append-only event, never a mutation.</td>
+        </tr>
+        <tr>
+          <td>No reconciliation or regulatory reporting</td>
+          <td>The suite reports to a console, not to a bank.</td>
+          <td>General-ledger breaks, IFRS 9 feeds, and regulatory returns have no control total. The value-date restatement report is the first missing control.</td>
+        </tr>
+        <tr>
+          <td>No API, authentication, PII handling, or observability</td>
+          <td>The assessment is a local core, not a service.</td>
+          <td>No security boundary, no access audit, no metrics, no tracing, and no alerting. These are go-live blockers, not polish.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p class="small">
+      The detailed numbers, ambiguities, and rejected criteria are in the repository's
+      NUMBERS.md, AMBIGUITIES.md, and REJECTED.md.
+    </p>
+  </body>
+</html>
