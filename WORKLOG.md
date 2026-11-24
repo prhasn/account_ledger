@@ -1,6 +1,6 @@
 # WORKLOG
 
-All times are UTC. The repository uses timestamps from the build session; commit times are local `+07:00` and appear in `git log`.
+All times are UTC. Timestamps are estimates reconstructed from the build session and commit timestamps; this is not a live, contemporaneous log. Commit times are local `+07:00` and appear in `git log`.
 
 ## 2026-11-24
 
@@ -39,3 +39,5 @@ All times are UTC. The repository uses timestamps from the build session; commit
 **14:47Z** Added GitHub Pages links for `architecture.html` and `architecture.pdf` to `README.md`, assuming GitHub Pages serves the `docs` directory as the site root. Folded the documentation commits into one local commit as requested; the feature, test, and style commits remain. Re-ran `npm test`: 30 tests pass. No push was made.
 
 **15:41Z** Added the explicit ES2020 target and the editor troubleshooting note after the BigInt diagnostic persisted. Audited the documents for factual claims: the remaining known overclaims are the "every" wording in `NUMBERS.md` and `AMBIGUITIES.md`, the API-level meaning of "immutable", and the tie-break-dependent value-date-sorting claim in `REJECTED.md`. `npm run typecheck` and `npm test` pass (30/30). No push was made.
+
+**15:47Z** Added an all-rights-reserved license, the README scope notice, and the timestamp-estimate note at the top of this log. Commercial use and redistribution are not permitted without prior written permission. No push was made.

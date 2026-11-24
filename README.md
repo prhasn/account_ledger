@@ -14,6 +14,10 @@ Repository: https://github.com/prhasn/account_ledger
 Architecture (GitHub Pages): https://prhasn.github.io/account_ledger/architecture.html
 Architecture PDF: https://prhasn.github.io/account_ledger/architecture.pdf
 
+> **Technical exercise only, not a financial product.** This repository exists to demonstrate ledger mechanics. It is not a bank, a payment system, a production ledger, or financial advice. The interest model applies a simple daily rate to positive balances and is **not Sharia-compliant**. No Sharia, regulatory, legal, or accounting review has been performed.
+>
+> **No commercial use.** All rights reserved. No commercial use, redistribution, or derivative use is permitted without prior written permission. See `LICENSE`.
+
 ## Requirements
 
 - Node.js 20 or newer
@@ -183,9 +187,14 @@ docs/              architecture HTML source and PDF
 - `AMBIGUITIES.md`: every ambiguity and its resolution.
 - `REJECTED.md`: refused criteria and abandoned approaches.
 - `WORKLOG.md`: timestamped build log.
+- `LICENSE`: all rights reserved, with no commercial use permitted.
 - `docs/architecture.pdf`: 2 to 4 page architecture and trade-offs document.
 - GitHub Pages version: https://prhasn.github.io/account_ledger/architecture.html
 
 ## Known failure
 
 `known_failure/retroactive-fee.test.ts` asserts that E7 would retroactively charge Days 2, 4, and 5. The actual result is one Day 5 fee. The test is intentionally red and is excluded from `npm test`. The inline comments mark the policy boundary; `REJECTED.md` explains the alternative and why it was not adopted.
+
+## License
+
+Copyright (c) 2026 prhasn. **All rights reserved.** Commercial use, redistribution, and derivative use are not permitted without prior written permission. See `LICENSE`. This is not a production-ready or Sharia-compliant financial product.
