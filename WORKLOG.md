@@ -37,3 +37,5 @@ All times are UTC. The repository uses timestamps from the build session; commit
 **14:16Z** Ran `npm ci` and `npm test` from a clean dependency install: 30 tests pass. Re-ran the known-failure command: one failure, actual `[5]` versus expected `[2, 4, 5]`. Confirmed the PDF is three A4 pages, the working tree is clean, and no em dashes or en dashes remain. No push was made.
 
 **14:47Z** Added GitHub Pages links for `architecture.html` and `architecture.pdf` to `README.md`, assuming GitHub Pages serves the `docs` directory as the site root. Folded the documentation commits into one local commit as requested; the feature, test, and style commits remain. Re-ran `npm test`: 30 tests pass. No push was made.
+
+**15:41Z** Added the explicit ES2020 target and the editor troubleshooting note after the BigInt diagnostic persisted. Audited the documents for factual claims: the remaining known overclaims are the "every" wording in `NUMBERS.md` and `AMBIGUITIES.md`, the API-level meaning of "immutable", and the tie-break-dependent value-date-sorting claim in `REJECTED.md`. `npm run typecheck` and `npm test` pass (30/30). No push was made.
