@@ -1,0 +1,22 @@
+{
+  "name": "account-ledger-core",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "In-memory, append-only account ledger core for a six-day event replay.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node --import tsx src/main.ts",
+    "test": "npm run typecheck && node --import tsx --test tests/*.test.ts",
+    "test:known-failure": "node --import tsx --test known_failure/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "pdf": "bash scripts/build-pdf.sh"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.2",
+    "tsx": "^4.23.15",
+    "typescript": "5.7.3"
+  }
+}
