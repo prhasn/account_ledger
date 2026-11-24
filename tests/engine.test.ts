@@ -216,12 +216,16 @@ describe(`ledger engine`, () => {
   });
 
   it(`does not assess a fee on a zero or positive close`, () => {
-    const ledger = makeLedger();
+    const positive = makeLedger();
+    const zero = makeLedger([{ ...TEST_ACCOUNT, openingBalance: 0n }]);
 
-    ledger.closeDay(1);
-    const result = ledger.getResult();
+    positive.closeDay(1);
+    zero.closeDay(1);
+    const positiveResult = positive.getResult();
+    const zeroResult = zero.getResult();
 
-    equal(result.fees.length, 0);
+    equal(positiveResult.fees.length, 0);
+    equal(zeroResult.fees.length, 0);
   });
 
   it(`accrues daily interest on a positive close and none on a negative close`, () => {
